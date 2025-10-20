@@ -39,7 +39,11 @@ uv.lock
 
 # Personal notes
 NOTES.txt
+notes/
 
 # Debug and placeholder files
 debug_corwin.py
 main.py
+
+# Test scripts
+tests/
