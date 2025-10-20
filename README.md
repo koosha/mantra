@@ -4,11 +4,11 @@ Mantra is a lightweight chatbot using LLMs and RAG architecture to provide accur
 
 ## Features
 
-✅ **Query Classification** - Automatically filters irrelevant questions
-✅ **Semantic Search** - FAISS-powered vector search over Delaware case law
-✅ **GPT-4o Responses** - High-quality legal analysis and explanations
-✅ **Source Citations** - Every answer includes case citations
-✅ **Metadata Filtering** - Filter by court, date, and topics
+- **Query Classification** - Automatically filters irrelevant questions
+- **Semantic Search** - FAISS-powered vector search over Delaware case law
+- **GPT-4o Responses** - High-quality legal analysis and explanations
+- **Source Citations** - Every answer includes case citations
+- **Metadata Filtering** - Filter by court, date, and topics
 
 
 ## Demo Screenshots
@@ -22,29 +22,26 @@ Mantra is a lightweight chatbot using LLMs and RAG architecture to provide accur
 
 ## Architecture
 
+### Query Pipeline
 ```mermaid
-graph TB
+graph LR
     A[User Query] --> B[Query Classifier]
-    B -->|Relevant| C[FAISS Indexer]
-    B -->|Irrelevant| D[Rejection Response]
-    C --> E[Semantic Search]
-    E --> F[Top K Chunks]
-    F --> G[Response Generator]
-    G --> H[GPT-4o]
-    H --> I[Legal Answer + Citations]
+    B -->|Relevant| C[Semantic Search]
+    B -->|Irrelevant| D[Rejection]
+    C --> E[FAISS Index]
+    E --> F[Top K Results]
+    F --> G[GPT-4o]
+    G --> H[Answer + Citations]
+```
 
-    J[CourtListener API] -->|Cases| K[Data Extractor]
-    K --> L[Delaware Cases JSON]
-    L --> M[Document Chunker]
-    M --> N[OpenAI Embeddings]
-    N --> O[FAISS Vector Index]
-    O --> C
-
-    style A fill:#e1f5ff
-    style I fill:#d4edda
-    style D fill:#f8d7da
-    style H fill:#fff3cd
-    style O fill:#d1ecf1
+### Data Pipeline
+```mermaid
+graph LR
+    A[CourtListener API] --> B[Data Extractor]
+    B --> C[Delaware Cases JSON]
+    C --> D[Document Chunker]
+    D --> E[OpenAI Embeddings]
+    E --> F[FAISS Index]
 ```
 
 ### Components
