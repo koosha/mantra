@@ -1,0 +1,48 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+venv/
+env/
+
+# Environment variables
+.env
+.env.local
+
+# Data and indexes
+data/
+faiss_index/
+faiss_index_test/
+chroma_db/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# uv
+uv.lock
+
+# Personal notes
+NOTES.txt
+
+# Documentation (managed separately)
+README.md
+
+# Debug and placeholder files
+debug_corwin.py
+main.py
