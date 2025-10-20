@@ -112,6 +112,22 @@
     }
 
     /**
+     * Convert basic markdown to HTML
+     */
+    function parseMarkdown(text) {
+        // Convert **bold** to <strong>bold</strong>
+        let html = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+        // Convert *italic* to <em>italic</em>
+        html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+        // Preserve line breaks
+        html = html.replace(/\n/g, '<br>');
+
+        return html;
+    }
+
+    /**
      * Add a message to the chat
      */
     function addMessage(text, sender, sources = null) {
@@ -120,7 +136,13 @@
 
         const bubbleDiv = document.createElement('div');
         bubbleDiv.className = 'message-bubble';
-        bubbleDiv.textContent = text;
+
+        // Parse markdown for bot messages, plain text for user messages
+        if (sender === 'bot') {
+            bubbleDiv.innerHTML = parseMarkdown(text);
+        } else {
+            bubbleDiv.textContent = text;
+        }
 
         messageDiv.appendChild(bubbleDiv);
 

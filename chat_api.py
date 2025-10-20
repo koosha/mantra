@@ -181,9 +181,18 @@ async def chat(message: ChatMessage):
             include_sources=False  # Don't add sources to text; chat widget displays them separately
         )
 
-        # Step 4: Format sources
+        # Step 4: Format sources (deduplicate by case_id)
         sources = []
-        for result in search_results[:3]:  # Top 3 sources
+        seen_case_ids = set()
+
+        for result in search_results:
+            case_id = result["metadata"].get("case_id")
+
+            # Skip if we've already added this case
+            if case_id in seen_case_ids:
+                continue
+
+            seen_case_ids.add(case_id)
             sources.append({
                 "case_name": result["metadata"]["case_name"],
                 "date": result["metadata"]["date_filed"],
@@ -191,6 +200,10 @@ async def chat(message: ChatMessage):
                 "citation": result["metadata"].get("case_name_full", result["metadata"]["case_name"]),
                 "url": result["metadata"].get("absolute_url", "#")
             })
+
+            # Limit to top 3 unique sources
+            if len(sources) >= 3:
+                break
 
         return ChatResponse(
             message=response_data["answer"],
