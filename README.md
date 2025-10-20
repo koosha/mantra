@@ -24,6 +24,7 @@ Mantra is a lightweight chatbot using LLMs and RAG architecture to provide accur
 
 ### Query Pipeline
 ```mermaid
+%%{init: {'theme':'neutral', 'themeVariables': { 'fontSize':'16px'}}}%%
 graph LR
     A[User Query] --> B[Query Classifier]
     B -->|Relevant| C[Semantic Search]
@@ -36,6 +37,7 @@ graph LR
 
 ### Data Pipeline
 ```mermaid
+%%{init: {'theme':'neutral', 'themeVariables': { 'fontSize':'16px'}}}%%
 graph LR
     A[CourtListener API] --> B[Data Extractor]
     B --> C[Delaware Cases JSON]
