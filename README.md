@@ -13,11 +13,13 @@ Mantra is a lightweight chatbot using LLMs and RAG architecture to provide accur
 
 ## Demo Screenshots
 
-![Demo Screenshot 1](static/img/demo_1.png)
+![Demo Screenshot 1](static/img/img_1.png)
 
-![Demo Screenshot 2](static/img/demo_2.png)
+![Demo Screenshot 2](static/img/img_2.png)
 
-![Demo Screenshot 3](static/img/demo_3.png)
+![Demo Screenshot 3](static/img/img_3.png)
+
+![Demo Screenshot 4](static/img/img_4.png)
 
 
 ## Architecture

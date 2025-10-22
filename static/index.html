@@ -22,27 +22,27 @@
         }
 
         .demo-container {
-            max-width: 1200px;
+            max-width: 900px;
             width: 100%;
             background: white;
             border-radius: 20px;
-            padding: 40px;
+            padding: 30px 40px;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
         }
 
         .demo-header {
             text-align: center;
-            margin-bottom: 40px;
+            margin-bottom: 25px;
         }
 
         .demo-header h1 {
-            font-size: 2.5rem;
+            font-size: 2rem;
             color: #1e3a8a;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
         }
 
         .demo-header p {
-            font-size: 1.2rem;
+            font-size: 1rem;
             color: #64748b;
         }
 
@@ -50,54 +50,61 @@
             text-align: center;
         }
 
-        .demo-content h2 {
-            color: #475569;
-            margin-bottom: 20px;
-        }
-
         .demo-content p {
-            font-size: 1.1rem;
+            font-size: 0.95rem;
             color: #64748b;
-            margin-bottom: 30px;
-            line-height: 1.6;
+            margin-bottom: 20px;
+            line-height: 1.5;
         }
 
-        .examples {
+        .content-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            grid-template-columns: 1fr 1fr;
             gap: 20px;
-            margin-top: 30px;
+            margin-top: 20px;
         }
 
-        .example-card {
+        .content-card {
             background: #f8fafc;
             padding: 20px;
-            border-radius: 10px;
+            border-radius: 12px;
             border-left: 4px solid #117ACA;
-        }
-
-        .example-card h3 {
-            color: #1e3a8a;
-            margin-bottom: 15px;
-            font-size: 1.1rem;
-        }
-
-        .example-card ul {
-            list-style: none;
             text-align: left;
         }
 
-        .example-card li {
-            padding: 8px 0;
-            color: #475569;
-            font-size: 0.95rem;
+        .content-card h3 {
+            color: #1e3a8a;
+            margin-bottom: 12px;
+            font-size: 1rem;
+            font-weight: 600;
         }
 
-        .example-card li:before {
-            content: "→ ";
+        .content-card p {
+            font-size: 0.8rem;
+            color: #64748b;
+            margin-bottom: 10px;
+            text-align: left;
+        }
+
+        .content-card ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .content-card li {
+            padding: 6px 0;
+            color: #475569;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: flex-start;
+        }
+
+        .content-card li:before {
+            content: "▸";
             color: #117ACA;
             font-weight: bold;
             margin-right: 8px;
+            font-size: 1em;
         }
 
         /* Chat Widget Styles */
@@ -368,31 +375,50 @@
         </div>
 
         <div class="demo-content">
-            <h2>About Mantra</h2>
             <p>
                 Mantra is a lightweight chatbot using large language models (LLMs) to provide answers from a specialized knowledge base. The current scope of its knowledge base is Delaware Supreme Court and Court of Chancery case law from 2005 to present.
             </p>
 
-            <div class="examples">
-                <div class="example-card">
-                    <h3>Example Questions</h3>
-                    <ul>
-                        <li>What is fiduciary duty?</li>
-                        <li>Explain the Revlon doctrine</li>
-                        <li>What is the business judgment rule?</li>
-                        <li>Explain the MFW framework</li>
-                        <li>What is Caremark oversight?</li>
-                    </ul>
+            <div class="content-grid">
+                <div class="content-card">
+                    <h3 style="margin-bottom: 15px;">Example Questions</h3>
+
+                    <div style="margin-bottom: 15px;">
+                        <h4 style="font-size: 0.9rem; color: #dc2626; margin-bottom: 8px;">❌ Out-of-Scope</h4>
+                        <ul>
+                            <li>What's the weather today?</li>
+                            <li>How do I make pasta?</li>
+                        </ul>
+                    </div>
+
+                    <div style="margin-bottom: 15px;">
+                        <h4 style="font-size: 0.9rem; color: #f59e0b; margin-bottom: 8px;">⚠️ Escalation Required</h4>
+                        <ul>
+                            <li>What is the Corwin doctrine?</li>
+                            <li>Explain the MFW framework</li>
+                            <li>What are Caremark duties?</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <h4 style="font-size: 0.9rem; color: #16a34a; margin-bottom: 8px;">✅ Answered Automatically</h4>
+                        <ul>
+                            <li>What is fiduciary duty?</li>
+                            <li>What is the business judgment rule?</li>
+                            <li>Explain entire fairness review</li>
+                        </ul>
+                    </div>
                 </div>
 
-                <div class="example-card">
-                    <h3>Technical Features</h3>
+                <div class="content-card">
+                    <h3>Key Features</h3>
                     <ul>
                         <li>RAG-powered responses</li>
                         <li>FAISS vector search</li>
                         <li>GPT-4o language model</li>
                         <li>Case law citations</li>
-                        <li>Smart query filtering</li>
+                        <li>Query classification</li>
+                        <li>Embeddable widget</li>
                     </ul>
                 </div>
             </div>

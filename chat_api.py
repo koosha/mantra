@@ -166,9 +166,26 @@ async def chat(message: ChatMessage):
         # Step 2: Search for relevant cases
         search_results = indexer.search(user_query, k=4)
 
+        # Check if results are high quality enough to answer
+        # Escalate if: no results OR top result has low similarity
+        SIMILARITY_THRESHOLD = 0.3  # Minimum similarity score to auto-answer (lowered for demo)
+
         if not search_results:
             return ChatResponse(
-                message="I apologize, but I couldn't find relevant Delaware case law for your question. Could you rephrase or provide more context?",
+                message="This is a relevant legal question, but we currently don't have the answer in a document that we can reference. Please kindly create a ticket so we can help you with this question.",
+                relevant=True,
+                sources=[],
+                confidence="low"
+            )
+
+        # Check similarity of top result
+        top_similarity = search_results[0].get("similarity", 0)
+        logger.info(f"Top result similarity: {top_similarity:.3f}")
+
+        if top_similarity < SIMILARITY_THRESHOLD:
+            logger.info(f"Low similarity ({top_similarity:.3f} < {SIMILARITY_THRESHOLD}), escalating to ticket")
+            return ChatResponse(
+                message="This is a relevant legal question, but we currently don't have the answer in a document that we can reference. Please kindly create a ticket so we can help you with this question.",
                 relevant=True,
                 sources=[],
                 confidence="low"
@@ -193,12 +210,26 @@ async def chat(message: ChatMessage):
                 continue
 
             seen_case_ids.add(case_id)
+
+            # Get case name, fallback to extracting from URL if "Unknown Case"
+            case_name = result["metadata"]["case_name"]
+            url = result["metadata"].get("absolute_url", "#")
+
+            if case_name == "Unknown Case" or not case_name:
+                # Extract from URL: /opinion/123/qian-v-zheng/ -> Qian v. Zheng
+                if url and "/" in url:
+                    url_parts = url.rstrip("/").split("/")
+                    if len(url_parts) > 0:
+                        slug = url_parts[-1]
+                        # Convert slug to title case: qian-v-zheng -> Qian v. Zheng
+                        case_name = " ".join(word.capitalize() for word in slug.split("-"))
+
             sources.append({
-                "case_name": result["metadata"]["case_name"],
+                "case_name": case_name,
                 "date": result["metadata"]["date_filed"],
                 "court": result["metadata"]["court"],
-                "citation": result["metadata"].get("case_name_full", result["metadata"]["case_name"]),
-                "url": result["metadata"].get("absolute_url", "#")
+                "citation": result["metadata"].get("case_name_full", case_name),
+                "url": url
             })
 
             # Limit to top 3 unique sources

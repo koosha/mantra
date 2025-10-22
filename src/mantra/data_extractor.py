@@ -19,92 +19,168 @@ class DelawareCaseLawExtractor:
     Extracts Delaware corporate law cases from CourtListener API.
     Focuses on key corporate governance topics.
     """
-    
+
     def __init__(self, api_token: Optional[str] = None, output_dir: str = "./data/cases"):
         """
         Initialize the extractor.
-        
+
         Args:
             api_token: CourtListener API token (optional but recommended for higher rate limits)
             output_dir: Directory to save extracted cases
         """
-        self.base_url = "https://www.courtlistener.com/api/rest/v3/opinions/"
+        self.base_url = "https://www.courtlistener.com/api/rest/v4"
         self.api_token = api_token
         self.output_dir = output_dir
         self.headers = {}
-        
+
         if api_token:
             self.headers["Authorization"] = f"Token {api_token}"
-        
+
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
-        
+
+        # Fetch and cache Delaware court IDs
+        self.court_ids = self.get_delaware_court_ids()
+
+    def get_delaware_court_ids(self) -> Dict[str, Dict]:
+        """
+        Fetch the actual court IDs for Delaware courts from CourtListener API.
+        This ensures we use the correct identifiers and avoid silent filtering failures.
+
+        Returns:
+            Dictionary mapping court names to their IDs and slugs
+        """
+        logger.info("Fetching Delaware court identifiers...")
+        court_ids = {}
+        url = f"{self.base_url}/courts/"
+        params = {"jurisdiction": "del", "page_size": 100}
+
+        while url:
+            try:
+                response = requests.get(url, params=params, headers=self.headers)
+                response.raise_for_status()
+                data = response.json()
+
+                for court in data.get("results", []):
+                    name = (court.get("full_name") or court.get("name") or "").lower()
+
+                    # Identify Delaware Supreme Court
+                    if "supreme court of delaware" in name:
+                        court_ids["supreme"] = {
+                            "id": court["id"],
+                            "slug": court.get("id"),
+                            "name": court.get("full_name")
+                        }
+                        logger.info(f"Found Delaware Supreme Court: ID={court['id']}")
+
+                    # Identify Delaware Court of Chancery
+                    if "court of chancery" in name and "delaware" in name:
+                        court_ids["chancery"] = {
+                            "id": court["id"],
+                            "slug": court.get("id"),
+                            "name": court.get("full_name")
+                        }
+                        logger.info(f"Found Delaware Court of Chancery: ID={court['id']}")
+
+                url = data.get("next")
+                params = None  # Next URL includes all params
+
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Error fetching court IDs: {e}")
+                break
+
+        if not court_ids:
+            logger.warning("No Delaware courts found! Using fallback identifiers.")
+            # Fallback to common identifiers if API fails
+            court_ids = {
+                "supreme": {"id": "del", "slug": "del", "name": "Delaware Supreme Court"},
+                "chancery": {"id": "delch", "slug": "delch", "name": "Delaware Court of Chancery"}
+            }
+
+        return court_ids
+
     def build_search_params(self) -> Dict:
         """
         Build search parameters for all Delaware Supreme Court and Court of Chancery cases.
-        No keyword filtering - retrieves all cases from these courts.
+        Uses verified court IDs to avoid silent filtering failures.
         """
+        # Get comma-separated court IDs
+        court_id_str = ",".join([
+            self.court_ids["supreme"]["id"],
+            self.court_ids["chancery"]["id"]
+        ])
+
         params = {
             "jurisdiction": "del",
-            "court": "delaware-supreme,delaware-chancery",
+            "court": court_id_str,  # Use actual court IDs
             "date_filed__gte": "2005-01-01",
-            # No full_text filter - get ALL cases from these courts
+            "precedential_status": "Published",  # Only published opinions
             "order_by": "-date_filed",  # Most recent first
+            "page_size": 100,  # Request more per page for efficiency
         }
+
+        logger.info(f"Search params: court IDs = {court_id_str}")
         return params
     
     def fetch_opinions(self, max_results: Optional[int] = None) -> List[Dict]:
         """
         Fetch opinions from CourtListener API with pagination.
-        
+
         Args:
             max_results: Maximum number of results to fetch (None for all)
-            
+
         Returns:
             List of opinion dictionaries
         """
         results = []
         params = self.build_search_params()
-        url = self.base_url
+        url = f"{self.base_url}/opinions/"
         page = 1
-        
+
         logger.info("Starting to fetch Delaware corporate law cases...")
-        
+        logger.info(f"Target courts: {self.court_ids['supreme']['name']}, {self.court_ids['chancery']['name']}")
+
         while True:
             try:
                 logger.info(f"Fetching page {page}...")
                 response = requests.get(url, params=params, headers=self.headers)
                 response.raise_for_status()
-                
+
                 data = response.json()
                 page_results = data.get("results", [])
                 results.extend(page_results)
-                
-                logger.info(f"Fetched {len(page_results)} opinions (Total: {len(results)})")
-                
+
+                # Log sample court to verify we're getting Delaware cases
+                if page_results:
+                    sample_court = page_results[0].get("court", "Unknown")
+                    logger.info(f"Fetched {len(page_results)} opinions (Total: {len(results)}) - Sample court: {sample_court}")
+                else:
+                    logger.info(f"Fetched {len(page_results)} opinions (Total: {len(results)})")
+
                 # Check if we've reached max_results
                 if max_results and len(results) >= max_results:
                     results = results[:max_results]
                     logger.info(f"Reached max_results limit: {max_results}")
                     break
-                
+
                 # Check for next page
                 next_url = data.get("next")
                 if not next_url:
                     logger.info("No more pages to fetch")
                     break
-                
+
                 url = next_url
                 params = None  # Params are included in next_url
                 page += 1
-                
+
                 # Rate limiting - be nice to the API
                 time.sleep(1)
-                
+
             except requests.exceptions.RequestException as e:
                 logger.error(f"Error fetching data: {e}")
+                logger.error(f"Response content: {response.text[:500] if 'response' in locals() else 'N/A'}")
                 break
-        
+
         logger.info(f"Total opinions fetched: {len(results)}")
         return results
     
