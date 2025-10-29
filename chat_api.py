@@ -3,8 +3,6 @@ FastAPI backend for Mantra chat widget.
 Exposes the RAG functionality as a REST API.
 """
 
-import os
-import sys
 from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
@@ -12,19 +10,27 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from dotenv import load_dotenv
 import logging
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+# Import from mantra package
+from src.mantra import (
+    DelawareCaseLawIndexer,
+    QueryClassifier,
+    LegalResponseGenerator,
+    get_settings,
+    format_sources,
+    get_http_status_code,
+    MantraException
+)
 
-from mantra import DelawareCaseLawIndexer, QueryClassifier, LegalResponseGenerator
-
-# Load environment variables
-load_dotenv()
+# Load settings
+settings = get_settings()
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=getattr(logging, settings.log_level),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Global components (loaded once at startup)
@@ -44,9 +50,9 @@ async def lifespan(app: FastAPI):
     try:
         # Initialize indexer
         indexer = DelawareCaseLawIndexer(
-            embedding_model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-small"),
-            index_path=os.getenv("FAISS_INDEX_PATH", "./faiss_index"),
-            data_path=os.getenv("DATA_DIR", "./data/cases") + "/delaware_cases.json"
+            embedding_model=settings.embedding_model,
+            index_path=str(settings.faiss_index_path),
+            data_path=str(settings.data_path)
         )
 
         # Load index
@@ -55,23 +61,26 @@ async def lifespan(app: FastAPI):
 
         # Initialize classifier
         classifier = QueryClassifier(
-            model=os.getenv("LLM_MODEL", "gpt-4")
+            model=settings.llm_model
         )
         logger.info("✅ Initialized query classifier")
 
         # Initialize response generator
         generator = LegalResponseGenerator(
-            model=os.getenv("LLM_MODEL", "gpt-4")
+            model=settings.llm_model
         )
         logger.info("✅ Initialized response generator")
 
         logger.info("🎉 Mantra is ready!")
 
-    except FileNotFoundError:
-        logger.error("❌ FAISS index not found. Please build the index first.")
+    except FileNotFoundError as e:
+        logger.error(f"❌ FAISS index not found. Please build the index first: {e}")
+        raise
+    except MantraException as e:
+        logger.error(f"❌ Mantra error during startup: {e}")
         raise
     except Exception as e:
-        logger.error(f"❌ Error during startup: {e}")
+        logger.error(f"❌ Unexpected error during startup: {e}")
         raise
 
     yield
@@ -164,15 +173,13 @@ async def chat(message: ChatMessage):
             )
 
         # Step 2: Search for relevant cases
-        search_results = indexer.search(user_query, k=4)
+        search_results = indexer.search(user_query, k=settings.default_retrieval_k)
 
         # Check if results are high quality enough to answer
         # Escalate if: no results OR top result has low similarity
-        SIMILARITY_THRESHOLD = 0.3  # Minimum similarity score to auto-answer (lowered for demo)
-
         if not search_results:
             return ChatResponse(
-                message="This is a relevant legal question, but we currently don't have the answer in a document that we can reference. Please kindly create a ticket so we can help you with this question.",
+                message="This is a relevant legal question, but we currently don't have the answer in a document that we can reference. Please kindly create a ticket so we can help you with this issue.",
                 relevant=True,
                 sources=[],
                 confidence="low"
@@ -182,10 +189,10 @@ async def chat(message: ChatMessage):
         top_similarity = search_results[0].get("similarity", 0)
         logger.info(f"Top result similarity: {top_similarity:.3f}")
 
-        if top_similarity < SIMILARITY_THRESHOLD:
-            logger.info(f"Low similarity ({top_similarity:.3f} < {SIMILARITY_THRESHOLD}), escalating to ticket")
+        if top_similarity < settings.similarity_threshold:
+            logger.info(f"Low similarity ({top_similarity:.3f} < {settings.similarity_threshold}), escalating to ticket")
             return ChatResponse(
-                message="This is a relevant legal question, but we currently don't have the answer in a document that we can reference. Please kindly create a ticket so we can help you with this question.",
+                message="This is a relevant legal question, but we currently don't have the answer in a document that we can reference. Please kindly create a ticket so we can help you with this issue.",
                 relevant=True,
                 sources=[],
                 confidence="low"
@@ -198,43 +205,8 @@ async def chat(message: ChatMessage):
             include_sources=False  # Don't add sources to text; chat widget displays them separately
         )
 
-        # Step 4: Format sources (deduplicate by case_id)
-        sources = []
-        seen_case_ids = set()
-
-        for result in search_results:
-            case_id = result["metadata"].get("case_id")
-
-            # Skip if we've already added this case
-            if case_id in seen_case_ids:
-                continue
-
-            seen_case_ids.add(case_id)
-
-            # Get case name, fallback to extracting from URL if "Unknown Case"
-            case_name = result["metadata"]["case_name"]
-            url = result["metadata"].get("absolute_url", "#")
-
-            if case_name == "Unknown Case" or not case_name:
-                # Extract from URL: /opinion/123/qian-v-zheng/ -> Qian v. Zheng
-                if url and "/" in url:
-                    url_parts = url.rstrip("/").split("/")
-                    if len(url_parts) > 0:
-                        slug = url_parts[-1]
-                        # Convert slug to title case: qian-v-zheng -> Qian v. Zheng
-                        case_name = " ".join(word.capitalize() for word in slug.split("-"))
-
-            sources.append({
-                "case_name": case_name,
-                "date": result["metadata"]["date_filed"],
-                "court": result["metadata"]["court"],
-                "citation": result["metadata"].get("case_name_full", case_name),
-                "url": url
-            })
-
-            # Limit to top 3 unique sources
-            if len(sources) >= 3:
-                break
+        # Step 4: Format sources using utility function
+        sources = format_sources(search_results, max_sources=3)
 
         return ChatResponse(
             message=response_data["answer"],
@@ -243,9 +215,15 @@ async def chat(message: ChatMessage):
             confidence=response_data.get("confidence", "medium")
         )
 
+    except MantraException as e:
+        # Handle known Mantra exceptions with proper HTTP status codes
+        status_code = get_http_status_code(e)
+        logger.error(f"Mantra error ({status_code}): {e}")
+        raise HTTPException(status_code=status_code, detail=str(e))
     except Exception as e:
-        logger.error(f"Error processing query: {e}")
-        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+        # Handle unexpected errors
+        logger.error(f"Unexpected error processing query: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An unexpected error occurred")
 
 
 @app.get("/examples")
@@ -272,8 +250,8 @@ if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
         "chat_api:app",
-        host="0.0.0.0",
-        port=8000,
+        host=settings.api_host,
+        port=settings.api_port,
         reload=True,
-        log_level="info"
+        log_level=settings.log_level.lower()
     )

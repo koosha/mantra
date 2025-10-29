@@ -3,19 +3,19 @@ Mantra - Delaware Corporate Law Chatbot
 Integrated application with all components.
 """
 
-import os
-import sys
-from pathlib import Path
 import streamlit as st
-from dotenv import load_dotenv
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+# Import from mantra package
+from src.mantra import (
+    DelawareCaseLawIndexer,
+    QueryClassifier,
+    LegalResponseGenerator,
+    get_settings,
+    format_sources
+)
 
-from mantra import DelawareCaseLawIndexer, QueryClassifier, LegalResponseGenerator
-
-# Load environment variables
-load_dotenv()
+# Load settings
+settings = get_settings()
 
 # Page configuration
 st.set_page_config(
@@ -73,6 +73,8 @@ if "generator" not in st.session_state:
     st.session_state.generator = None
 if "index_loaded" not in st.session_state:
     st.session_state.index_loaded = False
+if "retrieval_k" not in st.session_state:
+    st.session_state.retrieval_k = settings.default_retrieval_k
 
 
 def initialize_components():
@@ -82,11 +84,11 @@ def initialize_components():
             try:
                 # Initialize indexer
                 st.session_state.indexer = DelawareCaseLawIndexer(
-                    embedding_model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-small"),
-                    index_path=os.getenv("FAISS_INDEX_PATH", "./faiss_index"),
-                    data_path=os.getenv("DATA_DIR", "./data/cases") + "/delaware_cases.json"
+                    embedding_model=settings.embedding_model,
+                    index_path=str(settings.faiss_index_path),
+                    data_path=str(settings.data_path)
                 )
-                
+
                 # Load existing index
                 try:
                     st.session_state.indexer.load_index()
@@ -95,17 +97,17 @@ def initialize_components():
                 except FileNotFoundError:
                     st.sidebar.warning("⚠️ No index found. Please build the index first.")
                     st.session_state.index_loaded = False
-                
+
                 # Initialize classifier
                 st.session_state.classifier = QueryClassifier(
-                    model=os.getenv("LLM_MODEL", "gpt-4")
+                    model=settings.llm_model
                 )
-                
+
                 # Initialize response generator
                 st.session_state.generator = LegalResponseGenerator(
-                    model=os.getenv("LLM_MODEL", "gpt-4")
+                    model=settings.llm_model
                 )
-                
+
             except Exception as e:
                 st.error(f"Error initializing components: {e}")
 
@@ -144,7 +146,7 @@ def process_query(query: str) -> dict:
         
         retrieved_chunks = st.session_state.indexer.search(
             query=query,
-            k=4,
+            k=st.session_state.retrieval_k,
             filters=filters if filters else None,
             retrieve_k=20
         )
@@ -238,10 +240,23 @@ def main():
             st.info("Run `python indexer.py` to build the index")
         
         st.divider()
-        
+
+        # Retrieval settings
+        st.subheader("⚙️ Retrieval Settings")
+
+        st.session_state.retrieval_k = st.slider(
+            "Number of documents to retrieve",
+            min_value=1,
+            max_value=10,
+            value=st.session_state.retrieval_k,
+            help="Higher values provide more context but may include less relevant results"
+        )
+
+        st.divider()
+
         # Search filters
         st.subheader("🔍 Search Filters")
-        
+
         court_options = ["All Courts", "delaware-supreme", "delaware-chancery"]
         selected_court = st.selectbox("Court", court_options)
         st.session_state.filter_court = None if selected_court == "All Courts" else selected_court
