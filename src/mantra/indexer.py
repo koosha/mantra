@@ -258,24 +258,36 @@ class DelawareCaseLawIndexer:
     def save_index(self, index: faiss.Index, metadata: List[Dict]):
         """
         Save FAISS index and metadata to disk.
-        
+
+        Uses JSONL (JSON Lines) format for metadata instead of pickle.
+        More secure, human-readable, and cross-platform compatible.
+
         Args:
             index: FAISS index
             metadata: List of metadata dictionaries
         """
         logger.info(f"Saving index to {self.index_path}")
-        
+
         # Save FAISS index
         index_file = os.path.join(self.index_path, "index.faiss")
         faiss.write_index(index, index_file)
         logger.info(f"Saved FAISS index: {index_file}")
-        
-        # Save metadata
-        metadata_file = os.path.join(self.index_path, "metadata.pkl")
-        with open(metadata_file, 'wb') as f:
-            pickle.dump(metadata, f)
-        logger.info(f"Saved metadata: {metadata_file}")
-        
+
+        # Save metadata as JSONL (JSON Lines)
+        # Each line is a separate JSON object (one metadata dict per line)
+        metadata_file = os.path.join(self.index_path, "metadata.jsonl")
+        with open(metadata_file, 'w', encoding='utf-8') as f:
+            for meta in metadata:
+                json_line = json.dumps(meta, ensure_ascii=False)
+                f.write(json_line + '\n')
+        logger.info(f"Saved metadata: {metadata_file} ({len(metadata)} chunks)")
+
+        # Remove old pickle file if it exists (cleanup after migration)
+        old_pickle_file = os.path.join(self.index_path, "metadata.pkl")
+        if os.path.exists(old_pickle_file):
+            os.remove(old_pickle_file)
+            logger.info("Removed old pickle file after migration")
+
         # Save configuration
         config = {
             "embedding_model": self.embedding_model,
@@ -285,50 +297,114 @@ class DelawareCaseLawIndexer:
             "created_at": datetime.now().isoformat(),
             "total_cases": len(set(m["case_id"] for m in metadata)),
             "total_chunks": len(metadata),
+            "metadata_format": "jsonl"  # Track format version
         }
-        
+
         config_file = os.path.join(self.index_path, "config.json")
-        with open(config_file, 'w') as f:
+        with open(config_file, 'w', encoding='utf-8') as f:
             json.dump(config, f, indent=2)
         logger.info(f"Saved configuration: {config_file}")
     
     def load_index(self) -> Tuple[faiss.Index, List[Dict]]:
         """
         Load FAISS index and metadata from disk.
-        
+
+        Supports both JSONL (preferred) and pickle (legacy) formats.
+        Automatically migrates from pickle to JSONL if needed.
+        Validates index configuration against current embedding model.
+
         Returns:
             Tuple of (index, metadata)
+
+        Raises:
+            FileNotFoundError: If index files not found
+            IndexDimensionMismatchError: If index dimension doesn't match model
         """
+        from .exceptions import IndexDimensionMismatchError, IndexNotFoundError
+
         logger.info(f"Loading index from {self.index_path}")
-        
+
         # Load FAISS index
         index_file = os.path.join(self.index_path, "index.faiss")
         if not os.path.exists(index_file):
-            raise FileNotFoundError(f"Index file not found: {index_file}")
-        
+            raise IndexNotFoundError(self.index_path)
+
         index = faiss.read_index(index_file)
         logger.info(f"Loaded FAISS index with {index.ntotal} vectors")
-        
-        # Load metadata
-        metadata_file = os.path.join(self.index_path, "metadata.pkl")
-        if not os.path.exists(metadata_file):
-            raise FileNotFoundError(f"Metadata file not found: {metadata_file}")
-        
-        with open(metadata_file, 'rb') as f:
-            metadata = pickle.load(f)
-        logger.info(f"Loaded metadata for {len(metadata)} chunks")
-        
-        # Load configuration
+
+        # Load metadata (try JSONL first, fall back to pickle)
+        metadata_jsonl = os.path.join(self.index_path, "metadata.jsonl")
+        metadata_pickle = os.path.join(self.index_path, "metadata.pkl")
+
+        metadata = []
+        migrated_from_pickle = False
+
+        if os.path.exists(metadata_jsonl):
+            # Load from JSONL (preferred format)
+            logger.info("Loading metadata from JSONL format")
+            with open(metadata_jsonl, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if line.strip():  # Skip empty lines
+                        metadata.append(json.loads(line))
+            logger.info(f"Loaded {len(metadata)} chunks from JSONL")
+
+        elif os.path.exists(metadata_pickle):
+            # Load from pickle (legacy format) and auto-migrate
+            logger.warning("Loading metadata from legacy pickle format")
+            with open(metadata_pickle, 'rb') as f:
+                metadata = pickle.load(f)
+            logger.info(f"Loaded {len(metadata)} chunks from pickle")
+
+            # Auto-migrate to JSONL
+            logger.info("Auto-migrating metadata to JSONL format...")
+            with open(metadata_jsonl, 'w', encoding='utf-8') as f:
+                for meta in metadata:
+                    json_line = json.dumps(meta, ensure_ascii=False)
+                    f.write(json_line + '\n')
+            logger.info("Migration complete. Pickle file will be kept for backup.")
+            migrated_from_pickle = True
+
+        else:
+            raise FileNotFoundError(
+                f"No metadata file found in {self.index_path}. "
+                f"Expected either metadata.jsonl or metadata.pkl"
+            )
+
+        # Load and validate configuration
         config_file = os.path.join(self.index_path, "config.json")
         if os.path.exists(config_file):
-            with open(config_file, 'r') as f:
+            with open(config_file, 'r', encoding='utf-8') as f:
                 config = json.load(f)
+
+            # Validate index dimension matches current embedding model
+            saved_dimension = config.get('dimension')
+            saved_model = config.get('embedding_model')
+
+            if saved_dimension and saved_dimension != self.dimension:
+                raise IndexDimensionMismatchError(
+                    expected=self.dimension,
+                    actual=saved_dimension,
+                    model=self.embedding_model
+                )
+
             logger.info(f"Index created at: {config.get('created_at')}")
+            logger.info(f"Embedding model: {saved_model}")
             logger.info(f"Total cases: {config.get('total_cases')}")
-        
+            logger.info(f"Index dimension: {saved_dimension} (validated ✓)")
+
+            if migrated_from_pickle:
+                # Update config to reflect new format
+                config['metadata_format'] = 'jsonl'
+                with open(config_file, 'w', encoding='utf-8') as f:
+                    json.dump(config, f, indent=2)
+                logger.info("Updated config to reflect JSONL format")
+
+        else:
+            logger.warning("No config.json found. Consider rebuilding the index.")
+
         self.index = index
         self.metadata = metadata
-        
+
         return index, metadata
     
     def build_index(self, max_cases: Optional[int] = None):

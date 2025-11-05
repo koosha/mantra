@@ -5,12 +5,16 @@ Exposes the RAG functionality as a REST API.
 
 from pathlib import Path
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+import asyncio
+import uuid
+from contextvars import ContextVar
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import logging
+from starlette.middleware.base import BaseHTTPMiddleware
 
 # Import from mantra package
 from src.mantra import (
@@ -26,12 +30,24 @@ from src.mantra import (
 # Load settings
 settings = get_settings()
 
-# Configure logging
+# Request ID context variable (for async-safe request tracking)
+request_id_var: ContextVar[str] = ContextVar('request_id', default='no-request-id')
+
+
+class RequestIDFilter(logging.Filter):
+    """Add request ID to log records."""
+    def filter(self, record):
+        record.request_id = request_id_var.get()
+        return True
+
+
+# Configure logging with request ID support
 logging.basicConfig(
     level=getattr(logging, settings.log_level),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - [%(request_id)s] - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+logger.addFilter(RequestIDFilter())
 
 # Global components (loaded once at startup)
 indexer = None
@@ -89,6 +105,24 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down Mantra...")
 
 
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """Middleware to generate and track request IDs."""
+    async def dispatch(self, request: Request, call_next):
+        # Generate unique request ID
+        request_id = str(uuid.uuid4())
+
+        # Set in context var for logging
+        request_id_var.set(request_id)
+
+        # Process request
+        response = await call_next(request)
+
+        # Add request ID to response headers for client tracking
+        response.headers["X-Request-ID"] = request_id
+
+        return response
+
+
 # Initialize FastAPI app with lifespan handler
 app = FastAPI(
     title="Mantra Chat API",
@@ -96,6 +130,9 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+# Add request ID middleware (must be added before CORS for proper header handling)
+app.add_middleware(RequestIDMiddleware)
 
 # Enable CORS for browser access
 app.add_middleware(
@@ -159,8 +196,10 @@ async def chat(message: ChatMessage):
 
         logger.info(f"Received query: {user_query[:100]}...")
 
-        # Step 1: Classify query
-        classification = classifier.classify_query(user_query)
+        # Step 1: Classify query (async wrapper to prevent blocking)
+        classification = await asyncio.to_thread(
+            classifier.classify_query, user_query
+        )
 
         if not classification.get("relevant", False):
             # Query is not relevant to Delaware law
@@ -172,8 +211,10 @@ async def chat(message: ChatMessage):
                 confidence="high"
             )
 
-        # Step 2: Search for relevant cases
-        search_results = indexer.search(user_query, k=settings.default_retrieval_k)
+        # Step 2: Search for relevant cases (async wrapper to prevent blocking)
+        search_results = await asyncio.to_thread(
+            indexer.search, user_query, k=settings.default_retrieval_k
+        )
 
         # Check if results are high quality enough to answer
         # Escalate if: no results OR top result has low similarity
@@ -198,8 +239,9 @@ async def chat(message: ChatMessage):
                 confidence="low"
             )
 
-        # Step 3: Generate response
-        response_data = generator.generate_response(
+        # Step 3: Generate response (async wrapper to prevent blocking)
+        response_data = await asyncio.to_thread(
+            generator.generate_response,
             question=user_query,
             retrieved_chunks=search_results,
             include_sources=False  # Don't add sources to text; chat widget displays them separately
