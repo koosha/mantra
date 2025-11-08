@@ -6,8 +6,7 @@ Determines if queries are relevant to Delaware case law.
 import os
 import logging
 from typing import Dict, Tuple
-from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
+from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -56,16 +55,15 @@ class QueryClassifier:
     def __init__(self, model: str = "gpt-4"):
         """
         Initialize the classifier.
-        
+
         Args:
             model: OpenAI model to use for classification
         """
         self.model = model
-        self.llm = ChatOpenAI(model=model, temperature=0)
-        
-        # Classification prompt
-        self.classification_prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a legal query classifier for a Delaware corporate law chatbot.
+        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+        # Classification system prompt
+        self.system_prompt = """You are a legal query classifier for a Delaware corporate law chatbot.
 
 Your task is to determine if a user's query is relevant to Delaware corporate law and case law.
 
@@ -92,9 +90,7 @@ Respond with a JSON object containing:
 Example responses:
 {{"relevant": true, "confidence": 0.95, "reason": "Query asks about fiduciary duty, a core Delaware corporate law concept", "suggested_topics": ["fiduciary duty", "duty of care"]}}
 {{"relevant": false, "confidence": 0.99, "reason": "Query is a personal question unrelated to law", "suggested_topics": []}}
-"""),
-            ("user", "{query}")
-        ])
+"""
     
     def classify_query(self, query: str) -> Dict:
         """
@@ -131,16 +127,22 @@ Example responses:
         
         # Use LLM for ambiguous cases
         try:
-            prompt = self.classification_prompt.format_messages(query=query)
-            response = self.llm.invoke(prompt)
-            
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": query}
+                ],
+                temperature=0
+            )
+
             # Parse response (assuming JSON format)
             import json
-            result = json.loads(response.content)
+            result = json.loads(response.choices[0].message.content)
             result["method"] = "llm"
-            
+
             return result
-            
+
         except Exception as e:
             logger.error(f"Error in LLM classification: {e}")
             # Fallback to keyword-based classification

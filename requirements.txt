@@ -3,19 +3,12 @@ python-dotenv~=1.0.0
 pydantic~=2.0
 pydantic-settings~=2.0
 
-# OpenAI
+# OpenAI (direct API - no LangChain wrapper)
 openai~=1.30.0
 
 # Vector Database
 faiss-cpu~=1.8.0
 # For GPU support, use: faiss-gpu~=1.8.0
-
-# Document Processing & Text Splitting
-langchain-text-splitters~=0.2.0
-
-# LangChain (minimal - only what we actually use)
-langchain-openai~=0.1.0
-langchain-core~=0.2.0
 
 # Web Frameworks
 streamlit~=1.33.0

@@ -6,8 +6,7 @@ Generates legal responses with proper citations and formatting.
 import os
 import logging
 from typing import List, Dict
-from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
+from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -24,16 +23,15 @@ class LegalResponseGenerator:
     def __init__(self, model: str = "gpt-4"):
         """
         Initialize the response generator.
-        
+
         Args:
             model: OpenAI model to use
         """
         self.model = model
-        self.llm = ChatOpenAI(model=model, temperature=0)
-        
-        # Response generation prompt
-        self.response_prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are Mantra, an expert legal assistant specializing in Delaware corporate law.
+        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+        # Response generation system prompt
+        self.system_prompt = """You are Mantra, an expert legal assistant specializing in Delaware corporate law.
 
 Your role is to provide accurate, well-reasoned answers to questions about Delaware corporate law based on the provided case law excerpts.
 
@@ -55,14 +53,7 @@ CITATION FORMAT:
 - Reference cases naturally in your text: "In Smith v. Van Gorkom, the court held..."
 - Do NOT include a separate citations section at the end (sources are provided separately)
 
-Be professional, accurate, and helpful. If you're uncertain, say so."""),
-            ("user", """Question: {question}
-
-Relevant Case Law Excerpts:
-{context}
-
-Please provide a comprehensive answer based on these excerpts.""")
-        ])
+Be professional, accurate, and helpful. If you're uncertain, say so."""
     
     def generate_response(
         self,
@@ -93,13 +84,23 @@ Please provide a comprehensive answer based on these excerpts.""")
         
         # Generate response
         try:
-            prompt = self.response_prompt.format_messages(
-                question=question,
-                context=context
+            user_prompt = f"""Question: {question}
+
+Relevant Case Law Excerpts:
+{context}
+
+Please provide a comprehensive answer based on these excerpts."""
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0
             )
-            
-            response = self.llm.invoke(prompt)
-            answer = response.content
+
+            answer = response.choices[0].message.content
             
             # Extract and format sources
             sources = self._extract_sources(retrieved_chunks) if include_sources else []

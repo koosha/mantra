@@ -7,9 +7,7 @@ from datetime import datetime
 
 import faiss
 import numpy as np
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings
-from langchain_core.documents import Document
+from openai import OpenAI
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -27,19 +25,20 @@ class LegalDocumentChunker:
     """
     Intelligent chunking for legal documents.
     Preserves legal structure and citations.
+    Custom implementation without LangChain dependencies.
     """
-    
+
     def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 200):
         """
         Initialize the chunker.
-        
+
         Args:
             chunk_size: Target size for each chunk
             chunk_overlap: Overlap between chunks to preserve context
         """
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-        
+
         # Legal-aware separators (in order of preference)
         self.separators = [
             "\n\n\n",  # Major section breaks
@@ -49,32 +48,99 @@ class LegalDocumentChunker:
             ", ",      # Clause breaks
             " ",       # Word breaks
         ]
-        
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            length_function=len,
-            separators=self.separators
-        )
+
+    def _split_text_recursive(self, text: str, separators: list) -> list:
+        """
+        Recursively split text using separators until chunks are small enough.
+
+        Args:
+            text: Text to split
+            separators: List of separators to try
+
+        Returns:
+            List of text chunks
+        """
+        if not separators:
+            # Last resort: split by character
+            return [text[i:i + self.chunk_size] for i in range(0, len(text), self.chunk_size - self.chunk_overlap)]
+
+        separator = separators[0]
+        remaining_separators = separators[1:]
+
+        # Split by current separator
+        splits = text.split(separator)
+
+        chunks = []
+        current_chunk = []
+        current_length = 0
+
+        for split in splits:
+            split_length = len(split)
+
+            # If single split is too large, recursively split it
+            if split_length > self.chunk_size:
+                # Save current chunk if exists
+                if current_chunk:
+                    chunks.append(separator.join(current_chunk))
+                    current_chunk = []
+                    current_length = 0
+
+                # Recursively split the large piece
+                sub_chunks = self._split_text_recursive(split, remaining_separators)
+                chunks.extend(sub_chunks)
+
+            # If adding this split would exceed chunk_size, save current chunk
+            elif current_length + split_length + len(separator) > self.chunk_size and current_chunk:
+                chunks.append(separator.join(current_chunk))
+                # Start new chunk with overlap
+                overlap_text = separator.join(current_chunk)[-self.chunk_overlap:]
+                current_chunk = [overlap_text, split] if overlap_text else [split]
+                current_length = len(separator.join(current_chunk))
+
+            # Add split to current chunk
+            else:
+                current_chunk.append(split)
+                current_length += split_length + len(separator)
+
+        # Add remaining chunk
+        if current_chunk:
+            chunks.append(separator.join(current_chunk))
+
+        return chunks
+
+    def split_text(self, text: str) -> list:
+        """
+        Split text into chunks using recursive splitting.
+
+        Args:
+            text: Text to split
+
+        Returns:
+            List of text chunks
+        """
+        if not text or len(text) <= self.chunk_size:
+            return [text] if text else []
+
+        return self._split_text_recursive(text, self.separators)
     
     def chunk_case(self, case_data: Dict) -> List[Dict]:
         """
         Chunk a single case into smaller pieces with metadata.
-        
+
         Args:
             case_data: Case dictionary from data_extractor
-            
+
         Returns:
             List of chunk dictionaries with text and metadata
         """
         plain_text = case_data.get("plain_text", "")
-        
+
         if not plain_text or len(plain_text.strip()) < 100:
             logger.warning(f"Case {case_data.get('id')} has insufficient text")
             return []
-        
-        # Split text into chunks
-        chunks = self.text_splitter.split_text(plain_text)
+
+        # Split text into chunks using custom splitter
+        chunks = self.split_text(plain_text)
         
         # Create chunk documents with metadata
         chunk_docs = []
@@ -122,16 +188,16 @@ class DelawareCaseLawIndexer:
         self.embedding_model = embedding_model
         self.index_path = index_path
         self.data_path = data_path
-        
-        # Initialize embeddings
-        self.embeddings = OpenAIEmbeddings(model=embedding_model)
-        
+
+        # Initialize OpenAI client
+        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
         # Initialize chunker
         self.chunker = LegalDocumentChunker(chunk_size=1000, chunk_overlap=200)
-        
+
         # Create index directory
         os.makedirs(index_path, exist_ok=True)
-        
+
         # Index and metadata will be loaded/created
         self.index = None
         self.metadata = []
@@ -209,12 +275,16 @@ class DelawareCaseLawIndexer:
             batch_num = i // batch_size + 1
             
             logger.info(f"Processing batch {batch_num}/{total_batches} ({len(batch)} texts)")
-            
+
             try:
-                # Generate embeddings for batch
-                batch_embeddings = self.embeddings.embed_documents(batch)
+                # Generate embeddings for batch using OpenAI API
+                response = self.client.embeddings.create(
+                    model=self.embedding_model,
+                    input=batch
+                )
+                batch_embeddings = [item.embedding for item in response.data]
                 all_embeddings.extend(batch_embeddings)
-                
+
             except Exception as e:
                 logger.error(f"Error generating embeddings for batch {batch_num}: {e}")
                 raise
@@ -471,9 +541,13 @@ class DelawareCaseLawIndexer:
         """
         if self.index is None:
             raise ValueError("Index not loaded. Call load_index() or build_index() first.")
-        
-        # Generate query embedding
-        query_embedding = self.embeddings.embed_query(query)
+
+        # Generate query embedding using OpenAI API
+        response = self.client.embeddings.create(
+            model=self.embedding_model,
+            input=[query]
+        )
+        query_embedding = response.data[0].embedding
         query_vector = np.array([query_embedding], dtype=np.float32)
         
         # Normalize for cosine similarity
